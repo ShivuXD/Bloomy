@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@layer base {
+  html, body {
+    overflow-x: hidden;
+  }
+  body {
+    background-color: var(--color-bg, #FFFFFF);
+    color: var(--color-text, #1F2937);
+  }
+}
+
+:root {
+  /* Default / ADHD */
+  --color-bg: #FFFFFF;
+  --color-text: #1F2937;
+  --color-accent: #F97316;
+  --color-error: #EF4444;
+  --color-success: #22C55E;
+}
+
+.theme-dyslexia {
+  --color-bg: #FDF6E3;
+  --color-text: #333333;
+  --color-accent: #2563EB;
+  --color-error: #D97706;
+  --color-success: #16A34A;
+}
+
+.theme-asd {
+  --color-bg: #F4F4F5;
+  --color-text: #2D2D2D;
+  --color-accent: #0D9488;
+  --color-error: #D97706;
+  --color-success: #0D9488;
+}
+
+.font-dyslexia {
+  font-family: 'Lexend', 'OpenDyslexic', sans-serif;
+  letter-spacing: 0.08em;
+  line-height: 1.9;
+}
+
+.font-child-friendly {
+  font-family: 'Nunito', 'Fredoka', 'Quicksand', system-ui, sans-serif;
+}
+
+.font-dyslexia .font-child-friendly {
+  font-family: 'Lexend', 'OpenDyslexic', sans-serif;
+}
+
+.low-sensory {
+  filter: saturate(70%);
+}
+
