@@ -119,59 +119,6 @@ Parents can see:
 
 The goal is to give parents a simple picture of the child's learning journey instead of overwhelming them with technical data.
 
-## Project Structure
-
-Bloomy/
-├── src/
-│   ├── assets/
-│   │   └── images/
-│   │
-│   ├── components/
-│   │   ├── Game/
-│   │   │   ├── FocusGame.tsx
-│   │   │   ├── ReadingGame.tsx
-│   │   │   ├── SocialGame.tsx
-│   │   │   ├── RocketFocus.tsx
-│   │   │   ├── StopThinkGo.tsx
-│   │   │   ├── WhatWouldYouDo.tsx
-│   │   │   ├── WordBuilder.tsx
-│   │   │   ├── MemoryMission.tsx
-│   │   │   ├── GreetingMaster.tsx
-│   │   │   ├── StoryAdventure.tsx
-│   │   │   └── RealWorldMission.tsx
-│   │   │
-│   │   └── Peco/
-│   │       ├── Peco.tsx
-│   │       ├── PecoMascot.tsx
-│   │       └── SpeechBubble.tsx
-│   │
-│   ├── contexts/
-│   │   └── NurtureContext.tsx
-│   │
-│   ├── data/
-│   │   ├── activitiesData.ts
-│   │   └── realWorldMissionsData.ts
-│   │
-│   ├── services/
-│   │   ├── api.ts
-│   │   ├── pecoCompanion.ts
-│   │   └── inworldService.ts
-│   │
-│   ├── types/
-│   │   └── nurture.ts
-│   │
-│   └── utils/
-│       └── dashboardMetrics.ts
-│
-├── ml_service.py
-├── skill_classifier.pkl
-├── requirements.txt
-├── package.json
-├── vite.config.ts
-├── tsconfig.json
-├── .gitignore
-└── README.md
-
 ## Backend
 
 The backend is handled by `ml_service.py`.
