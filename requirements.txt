@@ -1,0 +1,10 @@
+# Runtime dependencies for Python 3.11+
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+joblib>=1.4,<2.0
+numpy>=1.26,<3.0
+pandas>=2.2,<3.0
+# Keep this aligned with the serialized skill_classifier.pkl model.
+scikit-learn==1.6.1
+python-dotenv>=1.0,<2.0
+google-generativeai>=0.8,<1.0
