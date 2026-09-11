@@ -72,10 +72,9 @@ export const ActivityChallengeView: React.FC<ActivityChallengeViewProps> = ({
         config.completionPecoMessage ||
         `You've been exploring lots of new words! Now let's see how you can use your word skills in the real world.`;
 
-      triggerPecoEvent('PROUD', speech, 5000);
-      speak(speech, 'proud', { priority: 'high', force: true });
+       triggerPecoEvent('PROUD', speech, 5000);
     }
-  }, [stage, config, customPecoIntro, triggerPecoEvent, speak]);
+  }, [stage, config, customPecoIntro, triggerPecoEvent]);
 
   const handleAcceptChallenge = useCallback(() => {
     stopSpeaking();
@@ -88,15 +87,13 @@ export const ActivityChallengeView: React.FC<ActivityChallengeViewProps> = ({
     challengeStartTimeRef.current = Date.now();
 
     const introSpeech = `Here is your challenge: "${challenge.title}"! ${challenge.scenario} ${challenge.challenge}`;
-    triggerPecoEvent('NORMAL_STATE', `Challenge: ${challenge.title}!`, 4000);
-    speak(introSpeech, 'happy', { priority: 'high', force: true });
-  }, [challenge, stopSpeaking, triggerPecoEvent, speak]);
+    triggerPecoEvent('NORMAL_STATE', introSpeech, 4000);
+  }, [challenge, stopSpeaking, triggerPecoEvent]);
 
   const handleAskHint = useCallback(() => {
-    setShowHint(true);
-    triggerPecoEvent('SHOW_HINT', challenge.hint, 5000);
-    speak(challenge.hint, 'thinking', { priority: 'high', force: true });
-  }, [challenge, triggerPecoEvent, speak]);
+  setShowHint(true);
+  triggerPecoEvent('SHOW_HINT', challenge.hint, 5000);
+}, [challenge, triggerPecoEvent]);
 
   const handleOptionClick = async (option: RealWorldOption) => {
     if (isCorrect === true) return;
@@ -113,19 +110,22 @@ export const ActivityChallengeView: React.FC<ActivityChallengeViewProps> = ({
       }
 
       triggerPecoEvent('CORRECT_ANSWER', challenge.pecoCheer);
-      speak(challenge.pecoCheer, 'celebrating', { priority: 'high', force: true });
 
-      // Report telemetry back to the AI model under the parent activity's skill tags
-      const accuracy = (1 - wrongTries / (wrongTries + 1)) * 100 || 100;
-      await onCorrectAnswer(
-        {
-          accuracy,
-          reaction_time: Date.now() - challengeStartTimeRef.current,
-          hesitation_count: 0,
-          retries: wrongTries,
-        },
-        activityId
-      );
+// Report telemetry in the background.
+// The child-facing interaction should not wait for the ML backend.
+const accuracy = (1 - wrongTries / (wrongTries + 1)) * 100 || 100;
+
+void onCorrectAnswer(
+  {
+    accuracy,
+    reaction_time: Date.now() - challengeStartTimeRef.current,
+    hesitation_count: 0,
+    retries: wrongTries,
+  },
+  activityId
+).catch((error) => {
+  console.error('Failed to submit challenge telemetry:', error);
+});
 
       try {
         confetti({
@@ -140,7 +140,6 @@ export const ActivityChallengeView: React.FC<ActivityChallengeViewProps> = ({
       setWiggleId(option.id);
       setWrongTries((prev) => prev + 1);
       triggerPecoEvent('WRONG_ANSWER', option.feedback);
-      speak(option.feedback, 'comforting', { priority: 'high', force: true });
       setTimeout(() => setWiggleId(null), 600);
     }
   };

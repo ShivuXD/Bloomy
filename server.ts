@@ -300,7 +300,9 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    if (process.env.INWORLD_API_KEY) {
+    // Prewarming can issue many paid TTS requests. Enable it explicitly only
+    // when the provider account has capacity and the cache benefit is desired.
+    if (process.env.INWORLD_API_KEY && process.env.PREWARM_TTS_CACHE === 'true') {
       preWarmTTSCache(process.env.INWORLD_API_KEY);
     }
   });

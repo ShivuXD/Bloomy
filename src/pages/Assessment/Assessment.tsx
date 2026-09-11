@@ -21,8 +21,10 @@ const Assessment: React.FC = () => {
 
   // Proactive activity introduction when entering or switching activity
   React.useEffect(() => {
-    onActivityEnter(currentMission);
-  }, [currentMission, onActivityEnter]);
+  if (currentMission === 'REAL_WORLD_MISSION') return;
+
+  onActivityEnter(currentMission);
+}, [currentMission, onActivityEnter]);
 
   const getMissionTitle = () => {
     switch (currentMission) {

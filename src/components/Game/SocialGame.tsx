@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNurture } from '../../contexts/NurtureContext';
 import { prepareAudioPlayback } from '../../services/inworldService';
 import { motion } from 'framer-motion';
@@ -43,6 +43,28 @@ const SocialGame: React.FC = () => {
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [feedbackType, setFeedbackType] = useState<'correct' | 'incorrect' | null>(null);
 
+  const navigationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wiggleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    return () => {
+      isMountedRef.current = false;
+
+      if (navigationTimerRef.current) {
+        clearTimeout(navigationTimerRef.current);
+        navigationTimerRef.current = null;
+      }
+
+      if (wiggleTimerRef.current) {
+        clearTimeout(wiggleTimerRef.current);
+        wiggleTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const handleReadStory = () => {
     if (isPecoSpeaking || isProcessing || isCompleted) return;
     prepareAudioPlayback();
@@ -79,21 +101,29 @@ const SocialGame: React.FC = () => {
         console.warn('Peco speech ended or encountered an issue:', err);
       }
 
-      // 3. Wait until Peco's Inworld audio completely finishes (await speak ensures this)
-      // 4. Then show the existing completion state for Feelings & Empathy
+      // Wait for Peco's feedback to finish, then complete the activity.
       setIsCompleted(true);
       completeGameActivity('SOCIAL', { silentCompanion: true });
 
+      // ML telemetry runs in the background so navigation is not blocked by the backend.
       const accuracy = (1 - wrongTries / (wrongTries + 1)) * 100 || 100;
-      await onCorrectAnswer({
+      void onCorrectAnswer({
         accuracy,
         reaction_time: Date.now() - startTime,
         hesitation_count: hesitationCount,
         retries: wrongTries,
-      }, 'SOCIAL');
+      }, 'SOCIAL').catch((error) => {
+        console.error('[SocialGame] Failed to submit telemetry:', error);
+      });
 
-      setTimeout(() => {
+      if (navigationTimerRef.current) {
+        clearTimeout(navigationTimerRef.current);
+      }
+
+      navigationTimerRef.current = setTimeout(() => {
+        if (!isMountedRef.current) return;
         setCurrentScreen('HOLISTIC_MAP');
+        navigationTimerRef.current = null;
       }, 1000);
     } else {
       // Incorrect answer: Happy or Angry
@@ -130,10 +160,12 @@ const SocialGame: React.FC = () => {
         console.warn('Peco explanation ended or encountered an issue:', err);
       }
 
-      // Wait until Peco completely finishes speaking, then allow child to try again
-      setWiggleIndex(null);
-      setSelectedChoice(null);
-      setIsProcessing(false);
+      // Keep the child locked until Peco's correction finishes, then allow another try.
+      if (isMountedRef.current) {
+        setWiggleIndex(null);
+        setSelectedChoice(null);
+        setIsProcessing(false);
+      }
       // Do not move forward after an incorrect answer.
     }
   };

@@ -45,11 +45,11 @@
   font-family: 'Nunito', 'Fredoka', 'Quicksand', system-ui, sans-serif;
 }
 
-.font-dyslexia .font-child-friendly {
+.font-dyslexia .font-child-friendly,
+.font-dyslexia .font-sans {
   font-family: 'Lexend', 'OpenDyslexic', sans-serif;
 }
 
 .low-sensory {
   filter: saturate(70%);
 }
-

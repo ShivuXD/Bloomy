@@ -122,7 +122,6 @@ const RealWorldMission: React.FC = () => {
         : "Hey! Ready for a real-world challenge? Let's see what you can do!";
 
       triggerPecoEvent('PROUD', introMessage, 4000);
-      speak(introMessage, 'proud', { priority: 'normal', force: true });
     }
   }, [stage, activeRealWorldMission, realWorldChallenge]);
 
@@ -142,8 +141,7 @@ const RealWorldMission: React.FC = () => {
 
     const startSpeech = `Here is your mission: ${currentMission.title}! Take your time, read the situation, and choose what feels right.`;
     triggerPecoEvent('NORMAL_STATE', startSpeech, 4000);
-    speak(startSpeech, 'happy', { priority: 'high', force: true });
-  }, [currentMission, stopSpeaking, triggerPecoEvent, speak]);
+  }, [currentMission, stopSpeaking, triggerPecoEvent]);
 
   // Move to the next mission step
   const handleNextMission = () => {
@@ -161,9 +159,9 @@ const RealWorldMission: React.FC = () => {
       missionStartTimeRef.current = Date.now();
 
       const nextMission = missionPlaylist[nextIndex];
-      const stepPrompt = `Mission ${nextIndex + 1}: ${nextMission.title}. What would you do?`;
-      triggerPecoEvent('NORMAL_STATE', stepPrompt, 3500);
-      speak(stepPrompt, 'thinking', { priority: 'normal', force: true });
+      const stepPrompt =
+  `Here's your next mission: ${nextMission.title}! ${nextMission.scenario} ${nextMission.challenge}`;
+  triggerPecoEvent('NORMAL_STATE', stepPrompt, 5000);
     } else {
       // All missions in playlist completed!
       setStage('COMPLETION');
@@ -173,7 +171,6 @@ const RealWorldMission: React.FC = () => {
       const completionMessage =
         "You did it! You completed today's Real World Mission! You practiced wonderful everyday skills.";
       triggerPecoEvent('LEVEL_COMPLETE', completionMessage, 6000);
-      speak(completionMessage, 'celebrating', { priority: 'high', force: true });
 
       onActivityComplete('REAL_WORLD_MISSION');
 
@@ -260,15 +257,13 @@ const RealWorldMission: React.FC = () => {
 
     const retryMessage = "Take your time! Let's look at the situation together.";
     triggerPecoEvent('ENCOURAGING', retryMessage, 3000);
-    speak(retryMessage, 'encouraging', { force: true });
   };
 
   // Hint handling
   const handleAskHint = () => {
-    setIsHintVisible(true);
-    triggerPecoEvent('SHOW_HINT', currentMission.hint, 5000);
-    speak(currentMission.hint, 'thinking', { force: true });
-  };
+  setIsHintVisible(true);
+  triggerPecoEvent('SHOW_HINT', currentMission.hint, 5000);
+};
 
   // Audio narrator for scenario
   const handleReadScenarioAloud = () => {
@@ -293,7 +288,6 @@ const RealWorldMission: React.FC = () => {
 
     const restartMsg = "Let's practice again! Repetition helps our confidence shine.";
     triggerPecoEvent('NORMAL_STATE', restartMsg, 3500);
-    speak(restartMsg, 'happy', { force: true });
   };
 
   // Return back to daily quests / main app

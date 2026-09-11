@@ -1,24 +1,36 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNurture } from '../../contexts/NurtureContext';
-import { Settings, BarChart2, Activity, User, Smile, Sparkles } from 'lucide-react';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import Peco from '../../components/Peco/Peco';
-import { PecoState } from '../../types/nurture';
+import {
+  ArrowLeft,
+  BarChart3,
+  BookOpen,
+  CheckCircle2,
+  ChevronDown,
+  Clock3,
+  Eye,
+  Focus,
+  Heart,
+  Settings,
+  Sparkles,
+  TrendingUp,
+  UserRound,
+} from 'lucide-react';
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
-type PecoTestState = PecoState | 'talking' | 'correct';
-
-const ANIMATION_TEST_LIST: { id: PecoTestState; label: string; desc: string }[] = [
-  { id: 'idle', label: 'Idle', desc: 'Gentle floating & breathing (default living state)' },
-  { id: 'talking', label: 'Talking', desc: 'Speech-synchronized bobbing & micro-movements' },
-  { id: 'listening', label: 'Listening', desc: 'Attentive friendly tilt when child speaks' },
-  { id: 'correct', label: 'Correct / Win', desc: 'Cheerful celebratory bounce with soft sparkles' },
-  { id: 'encouraging', label: 'Encouraging', desc: "Supportive gentle lean: 'Almost! Let's try again'" },
-  { id: 'calm', label: 'Calm Space', desc: 'Slow, peaceful mindful breathing loop' },
-  { id: 'thinking', label: 'Thinking', desc: 'Curious subtle head tilt during puzzles/hints' },
-  { id: 'proud', label: 'Proud', desc: 'Confident gentle upright lift' },
-  { id: 'excited', label: 'Excited', desc: 'Joyful lively movement' },
-  { id: 'comforting', label: 'Comforting', desc: 'Warm empathetic reassuring lean' },
-];
+type TrendPoint = {
+  day: string;
+  focus?: number;
+  reading?: number;
+  emotion?: number;
+};
 
 const ParentDashboard: React.FC = () => {
   const {
@@ -29,22 +41,46 @@ const ParentDashboard: React.FC = () => {
     streakDays,
     totalMissionsCompleted,
     weeklyTrendData,
+    childAge,
   } = useNurture();
-  const [testState, setTestState] = useState<PecoTestState>('idle');
+
+  const [trendRange, setTrendRange] = useState<'7' | '14'>('7');
 
   const playHours = Math.floor(totalPlaySeconds / 3600);
   const playMinutes = Math.floor((totalPlaySeconds % 3600) / 60);
-  const playTimeDisplay = `${playHours}h ${playMinutes}m`;
+  const playTimeDisplay =
+    playHours > 0 ? `${playHours}h ${playMinutes}m` : `${playMinutes}m`;
+
+  const trendData = useMemo<TrendPoint[]>(() => {
+    const data = Array.isArray(weeklyTrendData) ? weeklyTrendData : [];
+    return trendRange === '14' ? data : data.slice(-7);
+  }, [weeklyTrendData, trendRange]);
+
+  const latestTrend = trendData[trendData.length - 1];
+
+  const average = (key: keyof TrendPoint) => {
+    const values = trendData
+      .map((item) => item[key])
+      .filter((value): value is number => typeof value === 'number');
+
+    if (!values.length) return 0;
+    return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+  };
+
+  const focusAverage = average('focus');
+  const readingAverage = average('reading');
+  const emotionAverage = average('emotion');
 
   const toggleSetting = (key: keyof typeof accessibilitySettings) => {
     if (key === 'profile') return;
+
     setAccessibilitySettings({
       ...accessibilitySettings,
-      [key]: !accessibilitySettings[key]
+      [key]: !accessibilitySettings[key],
     });
   };
 
-  const setProfile = (profile: any) => {
+  const setProfile = (profile: string) => {
     setAccessibilitySettings({
       ...accessibilitySettings,
       profile,
@@ -53,172 +89,544 @@ const ParentDashboard: React.FC = () => {
     });
   };
 
+  const activeProfileLabel =
+    accessibilitySettings.profile === 'Default'
+      ? 'Standard support'
+      : accessibilitySettings.profile;
+
+  const getProgressLabel = (value: number) => {
+    if (value >= 80) return 'Strong';
+    if (value >= 60) return 'Developing';
+    if (value > 0) return 'Building';
+    return 'Getting started';
+  };
+
+  const getTrendMessage = () => {
+    if (!trendData.length) {
+      return 'Learning activity will appear here as your child completes more sessions.';
+    }
+
+    if (focusAverage >= readingAverage && focusAverage >= emotionAverage) {
+      return 'Attention-focused activities are currently showing the strongest observed performance.';
+    }
+
+    if (readingAverage >= emotionAverage) {
+      return 'Reading and phonics activities are currently showing the strongest observed performance.';
+    }
+
+    return 'Emotion and social activities are currently showing the strongest observed performance.';
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 p-6 md:p-8 font-sans">
-      <header className="flex justify-between items-center mb-10 max-w-5xl mx-auto">
-        <h1 className="text-3xl font-bold text-slate-800">Parent Dashboard</h1>
-        <button 
-          onClick={() => setCurrentScreen('DAILY_QUEST')}
-          className="text-blue-600 font-medium hover:underline"
-        >
-          Back to Child View
-        </button>
+    <div className="min-h-screen bg-[#f6f8fb] text-slate-900">
+      {/* Header */}
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-5 py-5 sm:px-8">
+          <div className="flex min-w-0 items-center gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white">
+              <UserRound size={21} strokeWidth={2} />
+            </div>
+
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Family overview
+              </p>
+              <h1 className="truncate text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+                Parent Dashboard
+              </h1>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setCurrentScreen('DAILY_QUEST')}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+          >
+            <ArrowLeft size={17} />
+            <span className="hidden sm:inline">Back to Child View</span>
+            <span className="sm:hidden">Back</span>
+          </button>
+        </div>
       </header>
 
-      <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
-        
-        {/* Settings Panel */}
-        <div className="md:col-span-1 space-y-6">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-            <h2 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <Settings size={20} />
-              Accessibility Toggles
-            </h2>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-semibold text-slate-600 mb-2 block">Quick Profile</label>
-                <div className="flex flex-wrap gap-2">
-                  {['Default', 'ADHD', 'Dyslexia', 'ASD'].map(p => (
-                    <button
-                      key={p}
-                      id={`quick-profile-${p.toLowerCase()}`}
-                      onClick={() => setProfile(p)}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${accessibilitySettings.profile === p ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                    >
-                      {p}
-                    </button>
-                  ))}
+      <main className="mx-auto max-w-7xl space-y-6 px-5 py-7 sm:px-8 lg:py-8">
+        {/* Welcome / high-level summary */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7">
+          <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+            <div>
+              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-blue-700">
+                <Sparkles size={16} />
+                Learning snapshot
+              </div>
+              <h2 className="text-2xl font-bold tracking-tight text-slate-900">
+                A clear view of your child&apos;s learning journey
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                Bloomy turns activity data into simple learning insights so you
+                can see progress, strengths, and areas that may benefit from
+                more practice.
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-slate-50 px-4 py-3 lg:min-w-[230px]">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Current support profile
+              </p>
+              <p className="mt-1 text-base font-bold text-slate-900">
+                {activeProfileLabel}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                {childAge ? `Age ${childAge}` : 'Personalized for your child'}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-slate-600">
+                  Activities completed
+                </p>
+                <CheckCircle2 size={18} className="text-emerald-600" />
+              </div>
+              <p className="mt-2 text-2xl font-bold text-slate-900">
+                {totalMissionsCompleted}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Completed learning missions
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-slate-600">
+                  Learning time
+                </p>
+                <Clock3 size={18} className="text-blue-600" />
+              </div>
+              <p className="mt-2 text-2xl font-bold text-slate-900">
+                {playTimeDisplay}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Recorded activity time
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-slate-600">
+                  Learning streak
+                </p>
+                <TrendingUp size={18} className="text-amber-600" />
+              </div>
+              <p className="mt-2 text-2xl font-bold text-slate-900">
+                {streakDays} {streakDays === 1 ? 'day' : 'days'}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Consecutive active days
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-slate-600">
+                  Current focus
+                </p>
+                <Focus size={18} className="text-violet-600" />
+              </div>
+              <p className="mt-2 text-2xl font-bold text-slate-900">
+                {focusAverage || '--'}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Observed attention trend
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+          {/* Main analytics */}
+          <div className="space-y-6">
+            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7">
+              <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <BarChart3 size={19} className="text-slate-700" />
+                    <h2 className="text-lg font-bold text-slate-900">
+                      Learning progress
+                    </h2>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Observed skill trends from recent activity.
+                  </p>
+                </div>
+
+                <div className="relative self-start">
+                  <select
+                    value={trendRange}
+                    onChange={(event) =>
+                      setTrendRange(event.target.value as '7' | '14')
+                    }
+                    className="appearance-none rounded-lg border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    aria-label="Trend range"
+                  >
+                    <option value="7">Last 7 days</option>
+                    <option value="14">Last 14 days</option>
+                  </select>
+                  <ChevronDown
+                    size={15}
+                    className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                  />
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-slate-100 space-y-3">
-                <label className="flex items-center justify-between cursor-pointer">
-                  <span className="text-slate-700 font-medium">Dyslexia Font</span>
-                  <input type="checkbox" checked={accessibilitySettings.dyslexiaFont} onChange={() => toggleSetting('dyslexiaFont')} className="w-5 h-5 accent-blue-600" />
-                </label>
-                <label className="flex items-center justify-between cursor-pointer">
-                  <span className="text-slate-700 font-medium">Low Sensory Mode</span>
-                  <input type="checkbox" checked={accessibilitySettings.lowSensoryMode} onChange={() => toggleSetting('lowSensoryMode')} className="w-5 h-5 accent-blue-600" />
-                </label>
-                <label className="flex items-center justify-between cursor-pointer">
-                  <span className="text-slate-700 font-medium">Text to Speech</span>
-                  <input type="checkbox" checked={accessibilitySettings.textToSpeech} onChange={() => toggleSetting('textToSpeech')} className="w-5 h-5 accent-blue-600" />
-                </label>
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl bg-blue-50/70 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+                    Attention
+                  </p>
+                  <p className="mt-1 text-xl font-bold text-slate-900">
+                    {focusAverage || '--'}
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-slate-500">
+                    {getProgressLabel(focusAverage)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-indigo-50/70 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">
+                    Reading
+                  </p>
+                  <p className="mt-1 text-xl font-bold text-slate-900">
+                    {readingAverage || '--'}
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-slate-500">
+                    {getProgressLabel(readingAverage)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-rose-50/70 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">
+                    Social &amp; emotion
+                  </p>
+                  <p className="mt-1 text-xl font-bold text-slate-900">
+                    {emotionAverage || '--'}
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-slate-500">
+                    {getProgressLabel(emotionAverage)}
+                  </p>
+                </div>
               </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Charts & Data */}
-        <div className="md:col-span-2 space-y-6">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-             <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-              <Activity size={20} />
-              Weekly Skill Trends
-            </h2>
-            <div className="w-full h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={weeklyTrendData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                  <XAxis dataKey="day" axisLine={false} tickLine={false} />
-                  <YAxis domain={[0, 100]} axisLine={false} tickLine={false} />
-                  <Tooltip 
-                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  />
-                  <Line type="monotone" dataKey="focus" stroke="#F97316" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} name="Focus (ATN)" />
-                  <Line type="monotone" dataKey="reading" stroke="#2563EB" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} name="Reading (PHON)" />
-                  <Line type="monotone" dataKey="emotion" stroke="#0D9488" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} name="Emotion (EMO)" />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-               <h3 className="text-slate-500 font-semibold mb-1">Total Play Time</h3>
-               <p className="text-3xl font-bold text-slate-800">{playTimeDisplay}</p>
-               <p className={`text-sm ${totalPlaySeconds > 0 ? 'text-green-600' : 'text-slate-400'} mt-2 font-medium`}>
-                 {totalPlaySeconds > 0 ? `↑ ${Math.max(1, Math.round(totalPlaySeconds / 60))}m this week` : '0m this week'}
-               </p>
-             </div>
-             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-               <h3 className="text-slate-500 font-semibold mb-1">Missions Completed</h3>
-               <p className="text-3xl font-bold text-slate-800">{totalMissionsCompleted}</p>
-               <p className={`text-sm ${streakDays > 0 ? 'text-green-600' : 'text-slate-400'} mt-2 font-medium`}>
-                 {streakDays > 0 ? `${streakDays} day streak!` : '0 days streak'}
-               </p>
-             </div>
-          </div>
-        </div>
-
-        {/* Peco Mascot Companion Verification & Animation Tester */}
-        <div className="col-span-1 md:col-span-3 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100 mb-6">
-            <div>
-              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                <Smile size={22} className="text-purple-600" />
-                Original Peco Mascot & Animation Verification
-              </h2>
-              <p className="text-sm text-slate-500 mt-1">
-                Single source of truth: 100% original Peco character design with transparent background and subtle natural animations.
-              </p>
-            </div>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-50 text-purple-700 text-xs font-bold self-start md:self-auto">
-              <Sparkles size={13} />
-              Current State: {testState.toUpperCase()}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-            {/* Mascot Display - Transparent, No Card Box */}
-            <div className="md:col-span-4 flex flex-col items-center justify-center p-6 bg-slate-50/70 rounded-2xl border border-slate-100/80">
-              <Peco state={testState} size="xl" showSpeechBubble={false} interactive={true} />
-              <div className="mt-3 text-center">
-                <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">
-                  Active Animation: <span className="text-purple-600 font-extrabold">{testState}</span>
-                </p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {ANIMATION_TEST_LIST.find(e => e.id === testState)?.desc}
-                </p>
-                <p className="text-[11px] text-purple-600 font-medium mt-1">
-                  💡 Tap Peco above to trigger his friendly interaction response!
-                </p>
-              </div>
-            </div>
-
-            {/* Animation State Selectors */}
-            <div className="md:col-span-8">
-              <p className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-3">
-                Select Interactive State:
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
-                {ANIMATION_TEST_LIST.map(item => (
-                  <button
-                    key={item.id}
-                    id={`test-peco-${item.id}`}
-                    onClick={() => setTestState(item.id)}
-                    className={`px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left flex flex-col ${
-                      testState === item.id
-                        ? 'bg-purple-600 text-white shadow-md scale-[1.02]'
-                        : 'bg-slate-100 text-slate-700 hover:bg-purple-100 hover:text-purple-800'
-                    }`}
+              <div className="mt-6 h-[320px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={trendData}
+                    margin={{ top: 8, right: 8, left: -10, bottom: 4 }}
                   >
-                    <span className="font-extrabold capitalize">{item.label}</span>
-                    <span className={`text-[10px] mt-0.5 font-normal truncate ${testState === item.id ? 'text-purple-100' : 'text-slate-500'}`}>
-                      {item.desc.split(':')[0]}
-                    </span>
-                  </button>
-                ))}
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      vertical={false}
+                      stroke="#e2e8f0"
+                    />
+                    <XAxis
+                      dataKey="day"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fontSize: 12, fill: '#64748b' }}
+                    />
+                    <YAxis
+                      domain={[0, 100]}
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fontSize: 12, fill: '#64748b' }}
+                      width={35}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: '12px',
+                        border: '1px solid #e2e8f0',
+                        boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
+                      }}
+                      formatter={(value: number, name: string) => [
+                        `${value}`,
+                        name,
+                      ]}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="focus"
+                      stroke="#2563eb"
+                      strokeWidth={2.5}
+                      dot={{ r: 3 }}
+                      activeDot={{ r: 5 }}
+                      name="Attention"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="reading"
+                      stroke="#6366f1"
+                      strokeWidth={2.5}
+                      dot={{ r: 3 }}
+                      activeDot={{ r: 5 }}
+                      name="Reading"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="emotion"
+                      stroke="#e11d48"
+                      strokeWidth={2.5}
+                      dot={{ r: 3 }}
+                      activeDot={{ r: 5 }}
+                      name="Social & emotion"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
               </div>
-              <div className="mt-4 p-3 bg-purple-50/60 rounded-xl border border-purple-100/60 text-xs text-purple-900 leading-relaxed">
-                <strong>Character Integrity:</strong> Peco is preserved exactly from the original reference image — with his original face, eyes, ears, hair colors, and purple hoodie. The blue photographic background has been completely removed to render him seamlessly with transparency across all screens.
-              </div>
-            </div>
-          </div>
-        </div>
 
-      </div>
+              <div className="mt-4 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <Eye size={18} className="mt-0.5 shrink-0 text-slate-600" />
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">
+                    What the graph tells you
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    {getTrendMessage()}
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                    These are learning observations from Bloomy activities,
+                    not medical or diagnostic measurements.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {/* Insights */}
+            <section className="grid gap-6 md:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <TrendingUp size={19} className="text-emerald-600" />
+                  <h2 className="text-lg font-bold text-slate-900">
+                    Growing strengths
+                  </h2>
+                </div>
+                <p className="mt-1 text-sm text-slate-500">
+                  Skills currently showing stronger observed performance.
+                </p>
+
+                <div className="mt-5 space-y-3">
+                  {[
+                    ['Attention', focusAverage],
+                    ['Reading', readingAverage],
+                    ['Social & emotion', emotionAverage],
+                  ]
+                    .sort((a, b) => Number(b[1]) - Number(a[1]))
+                    .slice(0, 2)
+                    .map(([label, value]) => (
+                      <div
+                        key={String(label)}
+                        className="rounded-xl border border-slate-100 bg-slate-50 p-4"
+                      >
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-sm font-semibold text-slate-700">
+                            {String(label)}
+                          </span>
+                          <span className="text-sm font-bold text-slate-900">
+                            {Number(value) || '--'}
+                          </span>
+                        </div>
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+                          <div
+                            className="h-full rounded-full bg-slate-900 transition-all"
+                            style={{
+                              width: `${Math.min(100, Number(value) || 0)}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <BookOpen size={19} className="text-blue-600" />
+                  <h2 className="text-lg font-bold text-slate-900">
+                    Areas to support
+                  </h2>
+                </div>
+                <p className="mt-1 text-sm text-slate-500">
+                  A gentle view of skills that may benefit from practice.
+                </p>
+
+                <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50/60 p-4">
+                  <p className="text-sm font-semibold text-slate-900">
+                    {(() => {
+                      const values = [
+                        ['Attention', focusAverage],
+                        ['Reading', readingAverage],
+                        ['Social & emotion', emotionAverage],
+                      ].sort((a, b) => Number(a[1]) - Number(b[1]));
+                      return values[0]?.[1]
+                        ? `${values[0][0]} may benefit from more practice`
+                        : 'Keep building consistent learning habits';
+                    })()}
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Short, repeatable activities and positive feedback can help
+                    build confidence as your child practises.
+                  </p>
+                </div>
+
+                <div className="mt-4 flex items-center gap-2 text-xs font-medium text-slate-500">
+                  <Heart size={14} />
+                  Focus on progress over comparison.
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {/* Parent controls */}
+          <aside className="space-y-6">
+            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100">
+                  <Settings size={19} className="text-slate-700" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">
+                    Profile &amp; support settings
+                  </h2>
+                  <p className="mt-1 text-sm leading-5 text-slate-500">
+                    Adjust the experience to better match your child&apos;s
+                    current needs.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <label className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Quick support profile
+                </label>
+
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {['Default', 'ADHD', 'Dyslexia', 'ASD'].map((profile) => (
+                    <button
+                      key={profile}
+                      type="button"
+                      id={`quick-profile-${profile.toLowerCase()}`}
+                      onClick={() => setProfile(profile)}
+                      className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+                        accessibilitySettings.profile === profile
+                          ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      {profile}
+                    </button>
+                  ))}
+                </div>
+
+                <p className="mt-3 text-xs leading-5 text-slate-500">
+                  These profiles change accessibility preferences. They do not
+                  diagnose or label your child.
+                </p>
+              </div>
+
+              <div className="mt-6 border-t border-slate-100 pt-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Accessibility
+                </p>
+
+                <div className="mt-3 divide-y divide-slate-100">
+                  {[
+                    ['dyslexiaFont', 'Dyslexia-friendly font'],
+                    ['lowSensoryMode', 'Low sensory mode'],
+                    ['textToSpeech', 'Text to speech'],
+                  ].map(([key, label]) => {
+                    const settingKey =
+                      key as keyof typeof accessibilitySettings;
+
+                    return (
+                      <label
+                        key={key}
+                        className="flex cursor-pointer items-center justify-between gap-4 py-4"
+                      >
+                        <span className="text-sm font-semibold text-slate-700">
+                          {label}
+                        </span>
+
+                        <span className="relative inline-flex shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(accessibilitySettings[settingKey])}
+                            onChange={() => toggleSetting(settingKey)}
+                            className="peer sr-only"
+                          />
+                          <span className="h-6 w-11 rounded-full bg-slate-200 transition peer-checked:bg-slate-900 peer-focus:ring-2 peer-focus:ring-slate-300" />
+                          <span className="pointer-events-none absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow-sm transition peer-checked:translate-x-5" />
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-slate-900 p-6 text-white shadow-sm">
+              <div className="flex items-start gap-3">
+                <Sparkles size={19} className="mt-0.5 text-slate-300" />
+                <div>
+                  <h2 className="text-base font-bold">A note for parents</h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    Bloomy uses activity performance and interaction patterns
+                    to adapt learning. Treat the dashboard as a helpful
+                    progress view, not as a clinical assessment.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex items-center gap-2">
+                <BarChart3 size={18} className="text-slate-700" />
+                <h2 className="text-base font-bold text-slate-900">
+                  Latest data point
+                </h2>
+              </div>
+
+              {latestTrend ? (
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-500">Attention</span>
+                    <span className="font-bold text-slate-800">
+                      {latestTrend.focus ?? '--'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-500">Reading</span>
+                    <span className="font-bold text-slate-800">
+                      {latestTrend.reading ?? '--'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-500">Social &amp; emotion</span>
+                    <span className="font-bold text-slate-800">
+                      {latestTrend.emotion ?? '--'}
+                    </span>
+                  </div>
+                  <p className="pt-1 text-xs text-slate-400">
+                    Latest recorded point: {latestTrend.day}
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-3 text-sm leading-6 text-slate-500">
+                  No recent trend data is available yet.
+                </p>
+              )}
+            </section>
+          </aside>
+        </div>
+      </main>
     </div>
   );
 };

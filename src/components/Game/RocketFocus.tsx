@@ -26,7 +26,7 @@ type RocketStage =
 
 const RocketFocus: React.FC = () => {
   const {
-  onCorrectAnswer,
+    onCorrectAnswer,
   onIncorrectAnswer,
   speak,
   stopSpeaking,
@@ -44,6 +44,10 @@ const RocketFocus: React.FC = () => {
   const [stars, setStars] = useState<{ id: number; isBlue: boolean; x: number; y: number }[]>([]);
   const [wiggleId, setWiggleId] = useState<number | null>(null);
   const [wrongTries, setWrongTries] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // Timer/interaction refs
+  const wiggleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Real-World Challenge State
   const [showHint, setShowHint] = useState(false);
@@ -73,6 +77,17 @@ const RocketFocus: React.FC = () => {
     }
   }, [timeLeft, stage]);
 
+  // Stop audio and clear pending UI timers when leaving the game.
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+      if (wiggleTimerRef.current) {
+        clearTimeout(wiggleTimerRef.current);
+        wiggleTimerRef.current = null;
+      }
+    };
+  }, [stopSpeaking]);
+
   const generateStars = () => {
     const newStars = Array.from({ length: 4 })
       .map((_, i) => ({
@@ -86,7 +101,7 @@ const RocketFocus: React.FC = () => {
   };
 
   const handleTap = async (star: { id: number; isBlue: boolean }) => {
-    if (stage !== 'PLAYING') return;
+    if (stage !== 'PLAYING' || isProcessing) return;
 
     if (star.isBlue) {
       const newScore = score + 1;
@@ -94,40 +109,51 @@ const RocketFocus: React.FC = () => {
 
       if (newScore >= REQUIRED_BLUE_STARS) {
         // ALL REQUIRED BLUE STARS FOUND!
+        setIsProcessing(true);
         setStage('ROCKET_FOCUS_COMPLETION');
+       
 
         // 1. Mark Rocket Focus as completed in Daily Missions
         setDailyMissions((prev) =>
           prev.map((m) => (m.id === 'ROCKET_FOCUS' ? { ...m, completed: true } : m))
         );
 
-        // 2. Award existing Rocket Focus XP exactly once
-       // 2. Award existing Rocket Focus XP exactly once
+        // 2. Award existing Rocket Focus telemetry once, without blocking the child-facing flow
         if (!hasAwardedRocketXpRef.current) {
           hasAwardedRocketXpRef.current = true;
-          const accuracy = Math.max(70, Math.round((1 - wrongTries / (wrongTries + REQUIRED_BLUE_STARS)) * 100));
-          await onCorrectAnswer({
-            accuracy,
-            reaction_time: Date.now() - startTimeRef.current,
-            hesitation_count: 0,
-            retries: wrongTries,
-          }, 'ROCKET_FOCUS');
+          const accuracy = Math.max(
+            70,
+            Math.round((1 - wrongTries / (wrongTries + REQUIRED_BLUE_STARS)) * 100)
+          );
+
+          void onCorrectAnswer(
+            {
+              accuracy,
+              reaction_time: Date.now() - startTimeRef.current,
+              hesitation_count: 0,
+              retries: wrongTries,
+            },
+            'ROCKET_FOCUS'
+          ).catch((error) => {
+            console.error('[Rocket Focus] Failed to submit telemetry:', error);
+          });
         }
 
-        // 3. Peco speaks completion feedback using existing Inworld voice
+        // 3. Peco speaks completion feedback using existing Inworld voice.
         prepareAudioPlayback();
         const completionSpeech = "Stellar focus! You caught all the blue stars!";
-        try {
-          await speak(completionSpeech, 'celebrating', {
-            priority: 'high',
-            force: true,
-          });
-        } catch (err) {
-          console.warn('Peco completion speech issue:', err);
-        }
 
-        // 4. Once Peco finishes speaking, unlock and transition to Real-World Challenge
-        setStage('CHALLENGE_ACTIVE');
+        try {
+  await speak(completionSpeech, 'celebrating', {
+    priority: 'high',
+    force: true,
+  });
+} catch (err) {
+  console.warn('Peco completion speech issue:', err);
+}
+
+setIsProcessing(false);
+setStage('CHALLENGE_ACTIVE');
       } else {
         generateStars();
       }
@@ -136,7 +162,15 @@ const RocketFocus: React.FC = () => {
       setWiggleId(star.id);
       setWrongTries((prev) => prev + 1);
       onIncorrectAnswer();
-      setTimeout(() => setWiggleId(null), 500);
+
+      if (wiggleTimerRef.current) {
+        clearTimeout(wiggleTimerRef.current);
+      }
+
+      wiggleTimerRef.current = setTimeout(() => {
+        setWiggleId(null);
+        wiggleTimerRef.current = null;
+      }, 500);
     }
   };
 
@@ -297,7 +331,7 @@ const RocketFocus: React.FC = () => {
   }
 
   // =========================================================================
-  // 2. ROCKET FOCUS COMPLETE TRANSITION (Waiting for Peco completion speech)
+  // 2. ROCKET FOCUS COMPLETE TRANSITION
   // =========================================================================
   if (stage === 'ROCKET_FOCUS_COMPLETION') {
     return (
@@ -440,7 +474,7 @@ const RocketFocus: React.FC = () => {
             }`}
           >
             <CheckCircle2 size={20} />
-            <span>{isProcessingChallenge ? 'Checking with Peco...' : 'I Found 3 Things!'}</span>
+            <span>{isProcessingChallenge ? 'Finishing...' : 'I Found 3 Things!'}</span>
           </button>
 
           {/* Helper Buttons: "Need a Hint?" & "Maybe Later" */}

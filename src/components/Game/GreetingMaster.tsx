@@ -236,7 +236,7 @@ const GreetingMaster: React.FC = () => {
   const [wiggleId, setWiggleId] = useState<string | null>(null);
   const [isCompleted, setIsCompleted] = useState(false);
   const [wrongTries, setWrongTries] = useState(0);
-
+  const [isProcessing, setIsProcessing] = useState(false);
   const currentScenario = SCENARIOS[scenarioIndex];
   const scenarioStartTimeRef = useRef<number>(Date.now());
 
@@ -253,21 +253,26 @@ const GreetingMaster: React.FC = () => {
   }, [scenarioIndex]);
 
   const handleSelectOption = async (opt: GreetingScenario['options'][0]) => {
-    setSelectedOptionId(opt.id);
+  if (isProcessing || isCompleted) return;
 
-    if (opt.isAppropriate) {
+  setIsProcessing(true);
+  setSelectedOptionId(opt.id);
+
+  if (opt.isAppropriate) {
       setIsCorrect(true);
       setFeedbackMessage(opt.explanation);
       recordExerciseProgress('GREETING_MASTER');
       triggerPecoEvent('CORRECT_ANSWER', `Spot on! ${opt.explanation}`);
 
       const accuracy = (1 - wrongTries / (wrongTries + 1)) * 100 || 100;
-      await onCorrectAnswer({
-        accuracy,
-        reaction_time: Date.now() - scenarioStartTimeRef.current,
-        hesitation_count: 0,
-        retries: wrongTries,
-      }, 'GREETING_MASTER');
+      void onCorrectAnswer({
+  accuracy,
+  reaction_time: Date.now() - scenarioStartTimeRef.current,
+  hesitation_count: 0,
+  retries: wrongTries,
+}, 'GREETING_MASTER').catch((error) => {
+  console.error('[Greeting Master] Failed to submit telemetry:', error);
+});
 
       try {
         confetti({ particleCount: 30, spread: 50, origin: { y: 0.7 } });
@@ -287,13 +292,14 @@ const GreetingMaster: React.FC = () => {
             confetti({ particleCount: 80, spread: 90, origin: { y: 0.55 } });
           } catch {}
         }
-      }, 2000);
+      }, 1200);
     } else {
       setIsCorrect(false);
       setFeedbackMessage(opt.explanation);
       setWiggleId(opt.id);
       setWrongTries((prev) => prev + 1);
       triggerPecoEvent('WRONG_ANSWER', `Good effort! ${opt.explanation}`);
+      setIsProcessing(false);
       setTimeout(() => setWiggleId(null), 600);
     }
   };
@@ -404,7 +410,7 @@ const GreetingMaster: React.FC = () => {
           return (
             <motion.button
               key={opt.id}
-              disabled={isCorrect === true || isCompleted}
+             disabled={isProcessing || isCorrect === true || isCompleted}
               onClick={() => handleSelectOption(opt)}
               animate={wiggleId === opt.id ? { x: [-8, 8, -6, 6, 0] } : {}}
               whileHover={!isCorrect ? { scale: 1.015 } : {}}

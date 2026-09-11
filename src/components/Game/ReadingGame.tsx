@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNurture } from '../../contexts/NurtureContext';
 import { motion } from 'framer-motion';
 import { Volume2, CheckCircle2, AlertCircle } from 'lucide-react';
-import { prepareAudioPlayback } from '../../services/inworldService';
 
 export interface PhonicsChoice {
   id: string;
@@ -49,7 +48,8 @@ const ReadingGame: React.FC = () => {
     onIncorrectAnswer,
     onHintNeeded,
     setCurrentMission,
-    speak,
+    triggerPecoEvent,
+    stopSpeaking,
     isPecoSpeaking,
     isPecoLoadingAudio,
   } = useNurture();
@@ -74,19 +74,23 @@ const ReadingGame: React.FC = () => {
     return () => clearTimeout(timer);
   }, [onHintNeeded]);
 
-  // Replay question audio using Peco's Inworld voice with clean speech text (never browser TTS)
+  // Replay through the centralized Peco event pipeline.
+  // This avoids depending on a direct `speak()` function at the game level.
   const handleReplayQuestion = useCallback(() => {
-    prepareAudioPlayback();
-    speak(PHONICS_QUESTION.fullSpeech, 'thinking', {
-      priority: 'high',
-      force: true,
-      displayText: PHONICS_QUESTION.fullDisplay,
-      speechText: PHONICS_QUESTION.fullSpeech,
-    });
-  }, [speak]);
+    triggerPecoEvent(
+      'NORMAL_STATE',
+      PHONICS_QUESTION.fullDisplay,
+      4000
+    );
+  }, [triggerPecoEvent]);
 
   const handleChoice = async (choice: PhonicsChoice) => {
     if (isAnswered) return;
+
+    // Stop any speech that started while entering the activity before
+    // starting answer feedback. This prevents the activity introduction
+    // from continuing underneath the result.
+    stopSpeaking();
 
     setSelectedId(choice.id);
 
@@ -95,12 +99,23 @@ const ReadingGame: React.FC = () => {
       setFeedbackMessage('Great job! Bear starts with the sound B!');
       const accuracy = (1 - wrongTries / (wrongTries + 1)) * 100 || 100;
 
-      await onCorrectAnswer({
+      // Exactly one automatic Peco speech source for the answer event.
+      triggerPecoEvent(
+        'CORRECT_ANSWER',
+        'Great job! Bear starts with the sound B!',
+        3000
+      );
+
+      // Telemetry/ML runs in the background and must never block the UI
+      // or control the timing of the child's interaction.
+      void onCorrectAnswer({
         accuracy,
         reaction_time: Date.now() - startTime,
         hesitation_count: hesitationCount,
         retries: wrongTries,
-        }, 'READING');
+      }, 'READING').catch((err) => {
+        console.error('Reading telemetry failed:', err);
+      });
 
       // Smooth progression to next activity
       setTimeout(() => {
@@ -111,6 +126,12 @@ const ReadingGame: React.FC = () => {
       setWrongTries(newWrongs);
       setWiggleId(choice.id);
       setFeedbackMessage('Almost! Listen for the sound B and try again.');
+
+      triggerPecoEvent(
+        'WRONG_ANSWER',
+        'Almost! Listen for the sound B and try again.',
+        2500
+      );
 
       onIncorrectAnswer(newWrongs);
 

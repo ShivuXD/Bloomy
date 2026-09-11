@@ -14,15 +14,24 @@ const Onboarding: React.FC = () => {
     setIsCalmSpaceOpen,
     childName,
     updateChildName,
+    childAge,
+      updateChildAge,
   } = useNurture();
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [nameInput, setNameInput] = useState<string>(childName === 'Friend' ? '' : childName);
+  const [ageInput, setAgeInput] = useState<string>(String(childAge));
 
   const handleStart = () => {
-    updateChildName(nameInput);
-    setCurrentScreen('ASSESSMENT');
-  };
+  updateChildName(nameInput);
+
+  const age = Number(ageInput);
+  if (Number.isFinite(age) && age >= 4 && age <= 14) {
+    updateChildAge(age);
+  }
+
+  setCurrentScreen('ASSESSMENT');
+};
 
   const toggleSetting = (key: keyof typeof accessibilitySettings) => {
     if (key === 'profile') return;
@@ -55,9 +64,7 @@ const Onboarding: React.FC = () => {
             <Sparkles size={14} className="text-purple-600" />
             <span>Learning Buddy Companion</span>
           </div>
-          <h1 className="text-3xl md:text-4xl font-extrabold text-[var(--color-text)] tracking-tight">
-            NurtureBloom
-          </h1>
+          <h1 className="text-3xl md:text-4xl font-extrabold text-[var(--color-text)] tracking-tight"> Bloomy </h1>
           <p className="text-slate-500 text-sm mt-1">
             An interactive, sensory-friendly adventure with your friend Peco
           </p>
@@ -89,6 +96,26 @@ const Onboarding: React.FC = () => {
             className="w-full py-3 px-4 rounded-2xl border-2 border-slate-200 focus:border-[var(--color-accent)] focus:outline-hidden text-base font-medium text-[var(--color-text)] bg-white shadow-xs transition-colors"
           />
         </div>
+        {/* Child Age Input */}
+<div className="w-full">
+  <label
+    htmlFor="onboarding-child-age"
+    className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 px-1"
+  >
+    How old are you?
+  </label>
+
+  <input
+    id="onboarding-child-age"
+    type="number"
+    min={4}
+    max={18}
+    value={ageInput}
+    onChange={(e) => setAgeInput(e.target.value)}
+    placeholder="Enter your age"
+    className="w-full py-3 px-4 rounded-2xl border-2 border-slate-200 focus:border-[var(--color-accent)] focus:outline-hidden text-base font-medium text-[var(--color-text)] bg-white shadow-xs transition-colors"
+  />
+</div>
 
         {/* Start CTA */}
         <button

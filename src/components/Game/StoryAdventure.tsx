@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';import { useNurture } from '../../contexts/NurtureContext';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNurture } from '../../contexts/NurtureContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
-import { BookOpen, Volume2, Sparkles, Check, HelpCircle, Heart, Star } from 'lucide-react';
+import { BookOpen, Volume2, Sparkles, Check, HelpCircle } from 'lucide-react';
 import { ActivityChallengeView } from './ActivityChallengeView';
 
 interface StoryStep {
@@ -134,26 +135,47 @@ const StoryAdventure: React.FC = () => {
   const [showHintPulse, setShowHintPulse] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
   const [wrongTries, setWrongTries] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+
   const stepStartTimeRef = useRef<number>(Date.now());
+  const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wiggleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const current = EASY_STORIES[stepIndex];
 
-  // Auto-read on step change if text-to-speech is enabled or on first render
-    useEffect(() => {
+  // Auto-read and reset step state when the story changes.
+  useEffect(() => {
     setSelectedId(null);
     setIsCorrect(null);
     setFeedback('');
     setShowHintPulse(false);
+    setIsProcessing(false);
+    stepStartTimeRef.current = Date.now();
 
-    triggerPecoEvent('NORMAL_STATE', `Story time! Listen: "${current.simpleSentence}"`);
-    if (accessibilitySettings.textToSpeech) {
-      speak(current.audioPrompt, 'talking', { force: true });
-    }
-  }, [stepIndex]);
+    triggerPecoEvent(
+      'NORMAL_STATE',
+      accessibilitySettings.textToSpeech
+        ? current.audioPrompt
+        : `Story time! Listen: "${current.simpleSentence}"`
+    );
+  }, [stepIndex, current, accessibilitySettings.textToSpeech, triggerPecoEvent]);
 
-  // Stop audio if navigating away
+  // Stop audio and pending timers if navigating away.
   useEffect(() => {
     return () => {
       stopSpeaking();
+
+      if (transitionTimerRef.current) {
+        clearTimeout(transitionTimerRef.current);
+      }
+
+      if (wiggleTimerRef.current) {
+        clearTimeout(wiggleTimerRef.current);
+      }
+
+      if (hintTimerRef.current) {
+        clearTimeout(hintTimerRef.current);
+      }
     };
   }, [stopSpeaking]);
 
@@ -166,15 +188,29 @@ const StoryAdventure: React.FC = () => {
   };
 
   const handleHelpHint = () => {
+    if (isProcessing || isCorrect === true) return;
+
     setShowHintPulse(true);
-    const correctChoice = current.choices.find(c => c.isCorrect);
+    const correctChoice = current.choices.find((choice) => choice.isCorrect);
+
     if (correctChoice) {
       triggerPecoEvent('SHOW_HINT', `Look for the ${correctChoice.label}!`);
     }
-    setTimeout(() => setShowHintPulse(false), 3000);
+
+    if (hintTimerRef.current) {
+      clearTimeout(hintTimerRef.current);
+    }
+
+    hintTimerRef.current = setTimeout(() => {
+      setShowHintPulse(false);
+      hintTimerRef.current = null;
+    }, 3000);
   };
 
-    const handleChoose = async (choice: StoryStep['choices'][0]) => {
+  const handleChoose = (choice: StoryStep['choices'][0]) => {
+    if (isProcessing || isCompleted || isCorrect === true) return;
+
+    setIsProcessing(true);
     setSelectedId(choice.id);
 
     if (choice.isCorrect) {
@@ -187,31 +223,54 @@ const StoryAdventure: React.FC = () => {
       } catch {}
 
       const accuracy = (1 - wrongTries / (wrongTries + 1)) * 100 || 100;
-      await onCorrectAnswer({
-        accuracy,
-        reaction_time: Date.now() - stepStartTimeRef.current,
-        hesitation_count: 0,
-        retries: wrongTries,
-      }, 'STORY_ADVENTURE');
 
-      setTimeout(() => {
+      // Telemetry is intentionally non-blocking so the child never waits for the ML backend.
+      void onCorrectAnswer(
+        {
+          accuracy,
+          reaction_time: Date.now() - stepStartTimeRef.current,
+          hesitation_count: 0,
+          retries: wrongTries,
+        },
+        'STORY_ADVENTURE'
+      ).catch((error) => {
+        console.error('[Story Adventure] Failed to submit telemetry:', error);
+      });
+
+      if (transitionTimerRef.current) {
+        clearTimeout(transitionTimerRef.current);
+      }
+
+      transitionTimerRef.current = setTimeout(() => {
+        setIsProcessing(false);
+        transitionTimerRef.current = null;
+
         if (stepIndex + 1 < EASY_STORIES.length) {
-          setStepIndex(prev => prev + 1);
+          setStepIndex((prev) => prev + 1);
         } else {
-          // Completed all stories
           setIsCompleted(true);
+
           try {
             confetti({ particleCount: 80, spread: 90, origin: { y: 0.55 } });
           } catch {}
         }
-      }, 2000);
+      }, 1200);
     } else {
       setIsCorrect(false);
       setFeedback(choice.cheer);
       setWiggleId(choice.id);
       setWrongTries((prev) => prev + 1);
       triggerPecoEvent('WRONG_ANSWER', choice.cheer);
-      setTimeout(() => setWiggleId(null), 700);
+      setIsProcessing(false);
+
+      if (wiggleTimerRef.current) {
+        clearTimeout(wiggleTimerRef.current);
+      }
+
+      wiggleTimerRef.current = setTimeout(() => {
+        setWiggleId(null);
+        wiggleTimerRef.current = null;
+      }, 700);
     }
   };
 
@@ -243,7 +302,7 @@ const StoryAdventure: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={handleHelpHint}
-            disabled={isCorrect === true}
+            disabled={isProcessing || isCorrect === true}
             className="px-3 py-1.5 rounded-full border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-800 font-bold text-xs flex items-center gap-1 transition-transform active:scale-95"
             title="Ask for a gentle hint"
           >
@@ -313,7 +372,7 @@ const StoryAdventure: React.FC = () => {
           return (
             <motion.button
               key={choice.id}
-              disabled={isCorrect === true}
+              disabled={isProcessing || isCorrect === true}
               onClick={() => handleChoose(choice)}
               animate={
                 wiggleId === choice.id
@@ -322,8 +381,8 @@ const StoryAdventure: React.FC = () => {
                   ? { scale: [1, 1.06, 1], boxShadow: '0 0 20px rgba(168, 85, 247, 0.6)' }
                   : {}
               }
-              whileHover={!isCorrect ? { scale: 1.04, y: -2 } : {}}
-              whileTap={!isCorrect ? { scale: 0.96 } : {}}
+              whileHover={!isCorrect && !isProcessing ? { scale: 1.04, y: -2 } : {}}
+              whileTap={!isCorrect && !isProcessing ? { scale: 0.96 } : {}}
               className={`min-h-[140px] md:min-h-[160px] p-4 rounded-3xl border-3 flex flex-col items-center justify-center gap-2 transition-all shadow-sm ${
                 showCorrect
                   ? 'border-emerald-500 bg-emerald-50 ring-4 ring-emerald-200'

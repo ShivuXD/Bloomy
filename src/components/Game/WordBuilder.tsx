@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNurture } from '../../contexts/NurtureContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
@@ -73,15 +73,16 @@ interface LetterTile {
 
 const WordBuilder: React.FC = () => {
   const {
-    onCorrectAnswer,
-    triggerPecoEvent,
-    speak,
-    stopSpeaking,
-    isPecoSpeaking,
-    setCurrentScreen,
-    completeGameActivity,
-    recordExerciseProgress,
-  } = useNurture();
+  difficultyLevel,
+  onCorrectAnswer,
+  triggerPecoEvent,
+  speak,
+  stopSpeaking,
+  isPecoSpeaking,
+  setCurrentScreen,
+  completeGameActivity,
+  recordExerciseProgress,
+} = useNurture();
 
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
   const [letters, setLetters] = useState<LetterTile[]>([]);
@@ -90,20 +91,49 @@ const WordBuilder: React.FC = () => {
   const [wiggle, setWiggle] = useState(false);
   const [isAllWordsComplete, setIsAllWordsComplete] = useState(false);
   const [wrongTries, setWrongTries] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  const currentExercise = WORD_EXERCISES[currentWordIndex];
+  const availableExercises = useMemo(() => {
+  if (difficultyLevel <= 3) {
+    return WORD_EXERCISES.filter((exercise) => exercise.word.length <= 3);
+  }
+
+  if (difficultyLevel <= 6) {
+    return WORD_EXERCISES.filter((exercise) => exercise.word.length <= 4);
+  }
+
+  return WORD_EXERCISES;
+}, [difficultyLevel]);
+
+const currentExercise =
+  availableExercises[currentWordIndex % availableExercises.length];
   const targetWord = currentExercise.word;
-  const advanceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wiggleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
   const wordStartTimeRef = useRef<number>(Date.now());
 
-  // Initialize or reset letters for the current word
+  // Initialize or reset letters for the current word.
   const setupWord = useCallback((index: number) => {
+    if (!isMountedRef.current) return;
+
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
+
+    if (wiggleTimerRef.current) {
+      clearTimeout(wiggleTimerRef.current);
+      wiggleTimerRef.current = null;
+    }
+
     const exercise = WORD_EXERCISES[index];
     const chars = exercise.word.split('');
-    
-    // Deterministic or pseudo-random scramble that guarantees not matching the word immediately
+
+    // Deterministic or pseudo-random scramble that guarantees
+    // the tiles are not initially in the answer order.
     const scrambled = [...chars].sort(() => Math.random() - 0.5);
-    // If scramble equals original and length > 1, swap first two
+
     if (scrambled.join('') === exercise.word && scrambled.length > 1) {
       const tmp = scrambled[0];
       scrambled[0] = scrambled[1];
@@ -117,88 +147,181 @@ const WordBuilder: React.FC = () => {
         isUsed: false,
       }))
     );
+
     setPlacedIndices([]);
     setIsWordComplete(false);
+    setIsProcessing(false);
     setWrongTries(0);
+    setWiggle(false);
     wordStartTimeRef.current = Date.now();
 
-    // Speak introduction for the word
+    // One automatic speech source for the word introduction.
     const prompt = `Word ${index + 1} of ${WORD_EXERCISES.length}: Let's spell ${exercise.word}! ${exercise.clue}`;
-    triggerPecoEvent('NORMAL_STATE', `Word ${index + 1}: Spell ${exercise.word}!`, 3500);
-    speak(prompt, 'idle', { priority: 'normal', force: true });
-  }, [triggerPecoEvent, speak]);
+    triggerPecoEvent('NORMAL_STATE', prompt, 3500);
+  }, [triggerPecoEvent]);
 
-  // Load first word on mount
+  // Load first word on mount and clean up timers/audio on unmount.
   useEffect(() => {
+    isMountedRef.current = true;
     setupWord(0);
+
     return () => {
+      isMountedRef.current = false;
       stopSpeaking();
-      if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+
+      if (advanceTimerRef.current) {
+        clearTimeout(advanceTimerRef.current);
+        advanceTimerRef.current = null;
+      }
+
+      if (wiggleTimerRef.current) {
+        clearTimeout(wiggleTimerRef.current);
+        wiggleTimerRef.current = null;
+      }
     };
-  }, []);
+  }, [setupWord, stopSpeaking]);
 
   // What has been spelled so far based on placedIndices
   const currentSpelled = placedIndices.map((idx) => letters[idx]?.char || '').join('');
 
-  // Handle clicking a letter tile to place it
-  const handleTileClick = async (tileIndex: number) => {
-    if (isWordComplete) return;
-    const tile = letters[tileIndex];
-    if (tile.isUsed) return;
+  // Handle clicking a letter tile to place it.
+  const handleTileClick = useCallback(
+    (tileIndex: number) => {
+      if (!isMountedRef.current || isWordComplete || isProcessing) return;
 
-    const nextCharIndex = placedIndices.length;
-    const expectedChar = targetWord[nextCharIndex];
+      const tile = letters[tileIndex];
+      if (!tile || tile.isUsed) return;
 
-    if (tile.char === expectedChar) {
-      // Correct letter placement
-      const newPlaced = [...placedIndices, tileIndex];
-      setPlacedIndices(newPlaced);
-      setLetters((prev) =>
-        prev.map((l, i) => (i === tileIndex ? { ...l, isUsed: true } : l))
-      );
+      const nextCharIndex = placedIndices.length;
+      const expectedChar = targetWord[nextCharIndex];
 
-      const newSpelled = currentSpelled + tile.char;
+      if (tile.char === expectedChar) {
+        const newPlaced = [...placedIndices, tileIndex];
 
-      if (newSpelled === targetWord) {
-        // Word is finished!
-        setIsWordComplete(true);
-        recordExerciseProgress('WORD_BUILDER');
-        triggerPecoEvent('CORRECT_ANSWER', currentExercise.pecoCheer);
-        speak(currentExercise.pecoCheer, 'celebrating', { priority: 'high', force: true });
+        setPlacedIndices(newPlaced);
+        setLetters((prev) =>
+          prev.map((l, i) =>
+            i === tileIndex ? { ...l, isUsed: true } : l
+          )
+        );
 
-        const accuracy = (targetWord.length / (targetWord.length + wrongTries)) * 100 || 100;
-        await onCorrectAnswer({
-          accuracy,
-          reaction_time: Date.now() - wordStartTimeRef.current,
-          hesitation_count: 0,
-          retries: wrongTries,
-        }, 'WORD_BUILDER');
+        const newSpelled = currentSpelled + tile.char;
 
-        try {
-          confetti({
-            particleCount: 40,
-            spread: 60,
-            origin: { y: 0.65 },
-          });
-        } catch {}
+        if (newSpelled === targetWord) {
+          // Word is finished.
+          setIsWordComplete(true);
+          setIsProcessing(true);
+          recordExerciseProgress('WORD_BUILDER');
 
-        // Auto-advance or wait for user to click next
-        advanceTimerRef.current = setTimeout(() => {
-          handleNextWord();
-        }, 2200);
+          const completionSpeech = currentExercise.pecoCheer;
+          const accuracy =
+            (targetWord.length /
+              (targetWord.length + wrongTries)) *
+              100 || 100;
+          const reactionTime = Math.max(
+            0,
+            Date.now() - wordStartTimeRef.current
+          );
+
+          // Use one speech source for automatic completion feedback.
+          prepareAudioPlayback();
+
+          void (async () => {
+            try {
+              await speak(completionSpeech, 'celebrating', {
+                priority: 'high',
+                force: true,
+              });
+            } catch (error) {
+              console.warn(
+                '[WordBuilder] Completion speech ended or failed:',
+                error
+              );
+            }
+
+            if (!isMountedRef.current) return;
+
+            // ML telemetry must not block the game.
+            void onCorrectAnswer(
+              {
+                accuracy,
+                reaction_time: reactionTime,
+                hesitation_count: 0,
+                retries: wrongTries,
+              },
+              'WORD_BUILDER'
+            ).catch((error) => {
+              console.error(
+                '[WordBuilder] Failed to submit telemetry:',
+                error
+              );
+            });
+
+            try {
+              confetti({
+                particleCount: 40,
+                spread: 60,
+                origin: { y: 0.65 },
+              });
+            } catch {}
+
+            if (advanceTimerRef.current) {
+              clearTimeout(advanceTimerRef.current);
+            }
+
+            // Keep the existing automatic advance, but only after Peco finishes.
+            advanceTimerRef.current = setTimeout(() => {
+              if (!isMountedRef.current) return;
+              handleNextWord();
+            }, 700);
+          })();
+        } else {
+          // Intermediate correct feedback: one automatic speech source.
+          triggerPecoEvent(
+            'CORRECT_ANSWER',
+            `Nice! Next letter for ${targetWord}!`,
+            2000
+          );
+        }
       } else {
-        triggerPecoEvent('CORRECT_ANSWER', `Nice! Next letter for ${targetWord}!`, 2000);
+        const newWrongs = wrongTries + 1;
+
+        setWiggle(true);
+        setWrongTries(newWrongs);
+
+        // One automatic speech source for the correction.
+        triggerPecoEvent(
+          'WRONG_ANSWER',
+          `Try sounding out the next letter of ${targetWord}!`,
+          2000
+        );
+
+        if (wiggleTimerRef.current) {
+          clearTimeout(wiggleTimerRef.current);
+        }
+
+        wiggleTimerRef.current = setTimeout(() => {
+          if (!isMountedRef.current) return;
+          setWiggle(false);
+          wiggleTimerRef.current = null;
+        }, 500);
       }
-    } else {
-      // Incorrect letter placement
-      setWiggle(true);
-      setWrongTries((prev) => prev + 1);
-      const gentleCorrection = `Try sounding out the next letter of ${targetWord}!`;
-      triggerPecoEvent('WRONG_ANSWER', gentleCorrection, 2000);
-      speak(gentleCorrection, 'comforting', { priority: 'high', force: true });
-      setTimeout(() => setWiggle(false), 500);
-    }
-  };
+    },
+    [
+      currentExercise.pecoCheer,
+      currentSpelled,
+      isProcessing,
+      isWordComplete,
+      letters,
+      onCorrectAnswer,
+      placedIndices,
+      recordExerciseProgress,
+      speak,
+      targetWord,
+      triggerPecoEvent,
+      wrongTries,
+    ]
+  );
 
   // Backspace / Remove last placed letter
   const handleBackspace = () => {
@@ -217,17 +340,22 @@ const WordBuilder: React.FC = () => {
     setLetters((prev) => prev.map((l) => ({ ...l, isUsed: false })));
   };
 
-  // Move to next word or complete activity
-  const handleNextWord = () => {
-    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+  // Move to next word or complete activity.
+  const handleNextWord = useCallback(() => {
+    if (!isMountedRef.current) return;
+
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
 
     if (currentWordIndex + 1 < WORD_EXERCISES.length) {
       const nextIndex = currentWordIndex + 1;
       setCurrentWordIndex(nextIndex);
       setupWord(nextIndex);
     } else {
-      // Completed all 7 words!
       setIsAllWordsComplete(true);
+
       try {
         confetti({
           particleCount: 80,
@@ -236,9 +364,11 @@ const WordBuilder: React.FC = () => {
         });
       } catch {}
     }
-  };
+  }, [currentWordIndex, setupWord]);
 
   const handleHearClue = () => {
+    if (isProcessing) return;
+
     if (isPecoSpeaking) {
       stopSpeaking();
     } else {
@@ -274,6 +404,7 @@ const WordBuilder: React.FC = () => {
 
         <button
           onClick={handleHearClue}
+          disabled={isProcessing}
           className={`px-3 py-1.5 rounded-xl border font-medium text-xs flex items-center gap-1.5 transition-colors ${
             isPecoSpeaking
               ? 'bg-purple-600 text-white border-purple-600 animate-pulse'
@@ -371,7 +502,7 @@ const WordBuilder: React.FC = () => {
       <div className="flex items-center gap-3">
         <button
           onClick={handleBackspace}
-          disabled={placedIndices.length === 0 || isWordComplete}
+          disabled={placedIndices.length === 0 || isWordComplete || isProcessing}
           className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-40 disabled:hover:bg-slate-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
         >
           <Delete size={15} />
@@ -380,7 +511,7 @@ const WordBuilder: React.FC = () => {
 
         <button
           onClick={handleResetWord}
-          disabled={placedIndices.length === 0 || isWordComplete}
+          disabled={placedIndices.length === 0 || isWordComplete || isProcessing}
           className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-40 disabled:hover:bg-slate-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
         >
           <RotateCcw size={15} />
@@ -390,6 +521,7 @@ const WordBuilder: React.FC = () => {
         {isWordComplete && (
           <button
             onClick={handleNextWord}
+            disabled={isProcessing}
             className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-transform shadow-md"
           >
             <span>Next Word</span>

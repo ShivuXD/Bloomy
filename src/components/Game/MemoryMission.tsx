@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNurture } from '../../contexts/NurtureContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
@@ -24,23 +24,42 @@ const ALL_ITEMS: MemoryItem[] = [
   { id: 'clover', name: 'Clover', icon: '🍀', color: 'text-emerald-500', bg: 'bg-emerald-50 border-emerald-200' },
 ];
 
-const ROUND_CONFIGS = [
-  { round: 1, length: 3, displayDurationMs: 1400, title: 'Warm Up: 3 Items' },
-  { round: 2, length: 4, displayDurationMs: 1200, title: 'Step Up: 4 Items' },
-  { round: 3, length: 5, displayDurationMs: 1100, title: 'Master: 5 Items' },
-];
-
 const MemoryMission: React.FC = () => {
   const {
-    onCorrectAnswer,
-    completeGameActivity,
-    setCurrentScreen,
-    triggerPecoEvent,
-    accessibilitySettings,
-    speak,
-    stopSpeaking,
-    isPecoSpeaking,
-  } = useNurture();
+  difficultyLevel,
+  onCorrectAnswer,
+  completeGameActivity,
+  setCurrentScreen,
+  triggerPecoEvent,
+  accessibilitySettings,
+  speak,
+  stopSpeaking,
+  isPecoSpeaking,
+} = useNurture();
+
+const memoryConfig = useMemo(() => {
+  if (difficultyLevel <= 3) {
+    return {
+      length: 3,
+      displayDurationMs: 1600,
+      title: 'Warm Up',
+    };
+  }
+
+  if (difficultyLevel <= 6) {
+    return {
+      length: 4,
+      displayDurationMs: 1300,
+      title: 'Step Up',
+    };
+  }
+
+  return {
+    length: 5,
+    displayDurationMs: 1000,
+    title: 'Master',
+  };
+}, [difficultyLevel]);
 
   const [currentRoundIndex, setCurrentRoundIndex] = useState(0);
   const [phase, setPhase] = useState<'SHOWING' | 'RECALL' | 'ROUND_SUCCESS' | 'COMPLETE'>('SHOWING');
@@ -52,31 +71,67 @@ const MemoryMission: React.FC = () => {
   const [showHintPulse, setShowHintPulse] = useState(false);
   const [wrongTaps, setWrongTaps] = useState(0);
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const sequenceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wiggleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const roundAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
   const recallStartTimeRef = useRef<number>(Date.now());
 
-  const currentRound = ROUND_CONFIGS[currentRoundIndex];
 
-  // Stop audio if navigating away
+  const currentRound = {
+  round: currentRoundIndex + 1,
+  ...memoryConfig,
+};
+
+  // Clean up audio and all activity timers when navigating away.
   useEffect(() => {
+    isMountedRef.current = true;
+
     return () => {
+      isMountedRef.current = false;
       stopSpeaking();
-      if (timerRef.current) clearTimeout(timerRef.current);
+
+      if (sequenceTimerRef.current) {
+        clearInterval(sequenceTimerRef.current);
+        sequenceTimerRef.current = null;
+      }
+
+      if (wiggleTimerRef.current) {
+        clearTimeout(wiggleTimerRef.current);
+        wiggleTimerRef.current = null;
+      }
+
+      if (hintTimerRef.current) {
+        clearTimeout(hintTimerRef.current);
+        hintTimerRef.current = null;
+      }
+
+      if (roundAdvanceTimerRef.current) {
+        clearTimeout(roundAdvanceTimerRef.current);
+        roundAdvanceTimerRef.current = null;
+      }
     };
   }, [stopSpeaking]);
 
-  // Start round
-  const setupRound = (roundIdx: number) => {
-    if (timerRef.current) clearTimeout(timerRef.current);
+  // Start a new memory round.
+  const setupRound = useCallback((roundIdx: number) => {
+    if (sequenceTimerRef.current) {
+      clearInterval(sequenceTimerRef.current);
+      sequenceTimerRef.current = null;
+    }
 
-    const cfg = ROUND_CONFIGS[roundIdx];
-    // Randomize sequence of unique items
+    const cfg = memoryConfig;
+
+    // Randomize sequence of unique items.
     const shuffled = [...ALL_ITEMS].sort(() => Math.random() - 0.5);
     const chosenSeq = shuffled.slice(0, cfg.length);
 
-    // Candidates are the chosen items plus 2-3 extra distractors
+    // Candidates are the chosen items plus 3 distractors.
     const remaining = shuffled.slice(cfg.length);
-    const pool = [...chosenSeq, ...remaining.slice(0, 3)].sort(() => Math.random() - 0.5);
+    const pool = [...chosenSeq, ...remaining.slice(0, 3)].sort(
+      () => Math.random() - 0.5
+    );
 
     setTargetSequence(chosenSeq);
     setCandidatePool(pool);
@@ -84,111 +139,233 @@ const MemoryMission: React.FC = () => {
     setPhase('SHOWING');
     setActiveHighlightIndex(0);
     setWrongTaps(0);
+    setShowHintPulse(false);
 
-    triggerPecoEvent('NORMAL_STATE', `Round ${cfg.round}! Watch the items carefully.`);
+    // One automatic speech source for the round intro.
+    triggerPecoEvent(
+      'NORMAL_STATE',
+      `Round ${cfg.round}! Watch the items carefully.`
+    );
 
-    // Flash items one by one
+    // Flash items one by one.
     let step = 0;
-    const interval = setInterval(() => {
+
+    sequenceTimerRef.current = setInterval(() => {
+      if (!isMountedRef.current) return;
+
       step += 1;
+
       if (step < chosenSeq.length) {
         setActiveHighlightIndex(step);
       } else {
-        clearInterval(interval);
+        clearInterval(sequenceTimerRef.current!);
+        sequenceTimerRef.current = null;
+
         setActiveHighlightIndex(-1);
         setPhase('RECALL');
         recallStartTimeRef.current = Date.now();
-        triggerPecoEvent('NORMAL_STATE', "Now tap the cards in the order you saw them!");
-        if (accessibilitySettings.textToSpeech) {
-          speak("Now tap the cards in the order you saw them!", 'thinking', { force: true });
-        }
+
+        // One automatic speech source for the recall instruction.
+        triggerPecoEvent(
+          'NORMAL_STATE',
+          'Now tap the cards in the order you saw them!'
+        );
       }
     }, cfg.displayDurationMs);
-  };
+  }, [memoryConfig, triggerPecoEvent]);
 
   useEffect(() => {
     setupRound(currentRoundIndex);
+
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+      if (sequenceTimerRef.current) {
+        clearInterval(sequenceTimerRef.current);
+        sequenceTimerRef.current = null;
+      }
     };
-  }, [currentRoundIndex]);
+  }, [currentRoundIndex, setupRound]);
 
   const handleReplaySequence = () => {
+    if (phase !== 'RECALL') return;
+
+    if (sequenceTimerRef.current) {
+      clearInterval(sequenceTimerRef.current);
+      sequenceTimerRef.current = null;
+    }
+
     setUserInputs([]);
     setPhase('SHOWING');
     setActiveHighlightIndex(0);
-    triggerPecoEvent('NORMAL_STATE', "Let's watch the sequence one more time!");
+
+    triggerPecoEvent(
+      'NORMAL_STATE',
+      "Let's watch the sequence one more time!"
+    );
 
     const cfg = currentRound;
     let step = 0;
-    const interval = setInterval(() => {
+
+    sequenceTimerRef.current = setInterval(() => {
+      if (!isMountedRef.current) return;
+
       step += 1;
+
       if (step < targetSequence.length) {
         setActiveHighlightIndex(step);
       } else {
-        clearInterval(interval);
+        clearInterval(sequenceTimerRef.current!);
+        sequenceTimerRef.current = null;
+
         setActiveHighlightIndex(-1);
         setPhase('RECALL');
         recallStartTimeRef.current = Date.now();
+        triggerPecoEvent(
+          'NORMAL_STATE',
+          'Now tap the cards in the order you saw them!'
+        );
       }
     }, cfg.displayDurationMs);
   };
 
   const handleProvideHint = () => {
+    if (
+      phase !== 'RECALL' ||
+      !targetSequence.length ||
+      userInputs.length >= targetSequence.length
+    ) {
+      return;
+    }
+
     setShowHintPulse(true);
+
     const nextExpected = targetSequence[userInputs.length];
+
     if (nextExpected) {
-      triggerPecoEvent('SHOW_HINT', `The next item is ${nextExpected.name}!`);
+      // Hint has a single automatic speech source.
+      triggerPecoEvent(
+        'SHOW_HINT',
+        `The next item is ${nextExpected.name}!`
+      );
     }
-    setTimeout(() => setShowHintPulse(false), 2000);
+
+    if (hintTimerRef.current) {
+      clearTimeout(hintTimerRef.current);
+    }
+
+    hintTimerRef.current = setTimeout(() => {
+      if (!isMountedRef.current) return;
+      setShowHintPulse(false);
+      hintTimerRef.current = null;
+    }, 2000);
   };
 
-  const handleCardClick = async (item: MemoryItem, poolIdx: number) => {
-    if (phase !== 'RECALL') return;
+  const handleCardClick = useCallback(
+    (item: MemoryItem, poolIdx: number) => {
+      if (!isMountedRef.current || phase !== 'RECALL') return;
 
-    const nextExpected = targetSequence[userInputs.length];
+      const nextExpected = targetSequence[userInputs.length];
 
-    if (item.id === nextExpected.id) {
-      // Correct tap
-      const updated = [...userInputs, item];
-      setUserInputs(updated);
+      if (!nextExpected) return;
 
-      if (updated.length === targetSequence.length) {
-        // Round Finished!
-        triggerPecoEvent('CORRECT_ANSWER', "Spot on! You remembered the whole pattern!");
+      if (item.id === nextExpected.id) {
+        const updated = [...userInputs, item];
+        setUserInputs(updated);
 
-        const accuracy = (targetSequence.length / (targetSequence.length + wrongTaps)) * 100 || 100;
-        await onCorrectAnswer({
-          accuracy,
-          reaction_time: Date.now() - recallStartTimeRef.current,
-          hesitation_count: 0,
-          retries: wrongTaps,
-        }, 'MEMORY_MISSION');
+        if (updated.length === targetSequence.length) {
+          // Round finished.
+          triggerPecoEvent(
+            'CORRECT_ANSWER',
+            'Spot on! You remembered the whole pattern!'
+          );
 
-        if (currentRoundIndex + 1 < ROUND_CONFIGS.length) {
-          setPhase('ROUND_SUCCESS');
-          try {
-            confetti({ particleCount: 35, spread: 60, origin: { y: 0.65 } });
-          } catch {}
-          setTimeout(() => {
-            setCurrentRoundIndex(prev => prev + 1);
-          }, 1800);
-        } else {
-          // Entire Game Completed!
-          setPhase('COMPLETE');
-          try {
-            confetti({ particleCount: 80, spread: 100, origin: { y: 0.55 } });
-          } catch {}
+          const accuracy =
+            (targetSequence.length /
+              (targetSequence.length + wrongTaps)) *
+              100 || 100;
+
+          // Telemetry must never block the game.
+          void onCorrectAnswer(
+            {
+              accuracy,
+              reaction_time:
+                Date.now() - recallStartTimeRef.current,
+              hesitation_count: 0,
+              retries: wrongTaps,
+            },
+            'MEMORY_MISSION'
+          ).catch((error) => {
+            console.error(
+              '[MemoryMission] Failed to submit telemetry:',
+              error
+            );
+          });
+
+          if (currentRoundIndex + 1 < 3) {
+            setPhase('ROUND_SUCCESS');
+
+            try {
+              confetti({
+                particleCount: 35,
+                spread: 60,
+                origin: { y: 0.65 },
+              });
+            } catch {}
+
+            if (roundAdvanceTimerRef.current) {
+              clearTimeout(roundAdvanceTimerRef.current);
+            }
+
+            roundAdvanceTimerRef.current = setTimeout(() => {
+              if (!isMountedRef.current) return;
+
+              setCurrentRoundIndex((prev) => prev + 1);
+              roundAdvanceTimerRef.current = null;
+            }, 1500);
+          } else {
+            // Entire game completed.
+            setPhase('COMPLETE');
+
+            try {
+              confetti({
+                particleCount: 80,
+                spread: 100,
+                origin: { y: 0.55 },
+              });
+            } catch {}
+          }
         }
+      } else {
+        // Mistake.
+        setWiggleKey(poolIdx);
+        setWrongTaps((prev) => prev + 1);
+
+        triggerPecoEvent(
+          'WRONG_ANSWER',
+          "That's okay! Try that card again or tap Hint."
+        );
+
+        if (wiggleTimerRef.current) {
+          clearTimeout(wiggleTimerRef.current);
+        }
+
+        wiggleTimerRef.current = setTimeout(() => {
+          if (!isMountedRef.current) return;
+          setWiggleKey(null);
+          wiggleTimerRef.current = null;
+        }, 600);
       }
-    } else {
-      // Mistake
-      setWiggleKey(poolIdx);
-      setWrongTaps((prev) => prev + 1);
-      triggerPecoEvent('WRONG_ANSWER', "That's okay! Try that card again or tap Hint.");
-      setTimeout(() => setWiggleKey(null), 600);
-    }
-  };
+    },
+    [
+      currentRoundIndex,
+      onCorrectAnswer,
+      phase,
+      setCurrentRoundIndex,
+      targetSequence,
+      triggerPecoEvent,
+      userInputs,
+      wrongTaps,
+    ]
+  );
 
   if (phase === 'COMPLETE') {
     return (
@@ -211,7 +388,7 @@ const MemoryMission: React.FC = () => {
         <div className="flex items-center gap-2">
           <span className="px-3 py-1 bg-amber-100 text-amber-800 font-bold rounded-full text-xs md:text-sm uppercase tracking-wider flex items-center gap-1.5">
             <Sparkles size={14} />
-            Round {currentRound.round} of {ROUND_CONFIGS.length}
+            Round {currentRound.round} of 3
           </span>
           <span className="text-xs font-semibold text-slate-500">
             {targetSequence.length} Steps
@@ -221,7 +398,7 @@ const MemoryMission: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={handleReplaySequence}
-            disabled={phase === 'SHOWING'}
+            disabled={phase !== 'RECALL'}
             className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium text-xs flex items-center gap-1 disabled:opacity-40 transition-colors"
             title="Watch the sequence again"
           >

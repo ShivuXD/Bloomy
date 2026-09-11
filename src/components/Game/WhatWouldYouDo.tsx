@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNurture } from '../../contexts/NurtureContext';
-import { pecoCompanion } from '../../services/pecoCompanion';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle2, Volume2, Sparkles, Award, ArrowRight, RotateCcw } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -178,11 +177,10 @@ const WhatWouldYouDo: React.FC = () => {
     situationStartTimeRef.current = Date.now();
 
     const situation = SOCIAL_SITUATIONS[currentIndex];
-    if (situation) {
-      triggerPecoEvent('NORMAL_STATE', situation.spokenPrompt, 4000);
-      speak(situation.spokenPrompt, 'happy', { priority: 'normal', force: true });
-    }
-  }, [currentIndex, isActivityCompleted, showRealWorldChallenge, triggerPecoEvent, speak]);
+   if (situation) {
+  triggerPecoEvent('NORMAL_STATE', situation.spokenPrompt, 4000);
+}
+  }, [currentIndex, isActivityCompleted, showRealWorldChallenge, triggerPecoEvent]);
 
   const handleReplayPrompt = useCallback(() => {
     if (isProcessing) return;
@@ -209,42 +207,35 @@ const WhatWouldYouDo: React.FC = () => {
 
         triggerPecoEvent('CORRECT_ANSWER', currentSituation.correctExplanation);
 
-        const accuracy = (1 - wrongTries / (wrongTries + 1)) * 100 || 100;
-        await onCorrectAnswer({
-          accuracy,
-          reaction_time: Date.now() - situationStartTimeRef.current,
-          hesitation_count: 0,
-          retries: wrongTries,
-        }, 'WHAT_WOULD_YOU_DO');
+// Send telemetry in the background.
+// Never make the child wait for the ML/backend response.
+const accuracy = (1 - wrongTries / (wrongTries + 1)) * 100 || 100;
 
-        // 1. Speak the complete compliment and WAIT for Inworld audio to finish completely
-        try {
-          await speak(currentSituation.correctExplanation, 'celebrating', {
-            priority: 'high',
-            force: true,
-          });
-        } catch (speechErr) {
-          console.warn('[Social Pathways] Speech error during compliment:', speechErr);
-        }
-
-        // 2. Double-check that Peco is no longer speaking
-        while (pecoCompanion.isCurrentlySpeaking) {
-          await new Promise((resolve) => setTimeout(resolve, 60));
-        }
-
-        // 3. Gentle brief pause after speech ends for smooth cognitive transition
-        await new Promise((resolve) => setTimeout(resolve, 200));
+void onCorrectAnswer(
+  {
+    accuracy,
+    reaction_time: Date.now() - situationStartTimeRef.current,
+    hesitation_count: 0,
+    retries: wrongTries,
+  },
+  'WHAT_WOULD_YOU_DO'
+).catch((error) => {
+  console.error('[Social Pathways] Failed to submit telemetry:', error);
+});
 
         // 4. Only after Peco has finished speaking the complete sentence:
-        if (currentIndex < SOCIAL_SITUATIONS.length - 1) {
-          // Advance to next situation
-          setCurrentIndex((prev) => prev + 1);
-          setSelectedChoiceId(null);
-          setFeedbackState('idle');
-          setFeedbackText('');
-          setWrongTries(0);
-          setIsProcessing(false);
-        } else {
+       if (currentIndex < SOCIAL_SITUATIONS.length - 1) {
+  advanceTimerRef.current = setTimeout(() => {
+    setCurrentIndex((prev) => prev + 1);
+    setSelectedChoiceId(null);
+    setFeedbackState('idle');
+    setFeedbackText('');
+    setWrongTries(0);
+    setIsProcessing(false);
+    advanceTimerRef.current = null;
+  }, 1200);
+}
+         else {
           // Situation 7 of 7 Mastered!
           // ONLY NOW show the Social Pathways completion screen
           setIsActivityCompleted(true);
@@ -269,7 +260,6 @@ const WhatWouldYouDo: React.FC = () => {
           const completionMsg =
             'You practiced some great ways to communicate with others!';
           triggerPecoEvent('LEVEL_COMPLETE', completionMsg, 5000);
-          speak(completionMsg, 'celebrating', { priority: 'high', force: true });
         }
       } else {
         // Incorrect answer: gentle encouraging feedback, allow retry, no XP penalty
@@ -284,23 +274,6 @@ const WhatWouldYouDo: React.FC = () => {
         }, 500);
 
         triggerPecoEvent('WRONG_ANSWER', currentSituation.incorrectExplanation);
-
-        // Wait for Peco's Inworld audio to completely finish speaking the explanation
-        try {
-          await speak(currentSituation.incorrectExplanation, 'encouraging', {
-            priority: 'high',
-            force: true,
-          });
-        } catch (speechErr) {
-          console.warn('[Social Pathways] Speech error during incorrect explanation:', speechErr);
-        }
-
-        // Double-check that Peco is no longer speaking
-        while (pecoCompanion.isCurrentlySpeaking) {
-          await new Promise((resolve) => setTimeout(resolve, 60));
-        }
-
-        // Re-enable answer choices so the child can try again
         setIsProcessing(false);
       }
     },
@@ -312,7 +285,6 @@ const WhatWouldYouDo: React.FC = () => {
       wrongTries,
       onCorrectAnswer,
       triggerPecoEvent,
-      speak,
       recordExerciseProgress,
       completeGameActivity,
     ]

@@ -162,6 +162,8 @@ interface NurtureContextType {
   // Child identity (used for personalized AI messages)
   childName: string;
   updateChildName: (name: string) => void;
+  childAge: number;
+  updateChildAge: (age: number) => void;
 }
 
 const WELCOME_SESSION_KEY = 'peco_welcomed_session';
@@ -426,41 +428,107 @@ export const NurtureProvider = ({ children }: { children: ReactNode }) => {
     } catch {}
   }, []);
 
-  const onCorrectAnswer = useCallback(async (telemetry?: Telemetry, activityId?: string) => {
-    pecoCompanion.onCorrectAnswer(lowSensoryRef.current);
+  const [childAge, setChildAge] = useState<number>(() => {
+  try {
+    const saved = localStorage.getItem('nurture_child_age');
+    const parsed = saved ? parseInt(saved, 10) : 8;
 
-    if (telemetry && activityId) {
-      try {
-        const aiResult = await submitAssessment(telemetry, childName);
+    return Number.isFinite(parsed) && parsed >= 4 && parsed <= 18
+      ? parsed
+      : 8;
+  } catch {
+    return 8;
+  }
+});
 
-        setDifficultyLevel(aiResult.difficulty_level);
+const updateChildAge = useCallback((age: number) => {
+  const cleanAge = Math.max(4, Math.min(18, Math.round(age)));
 
-        // Show real Gemini message + emotion
-        if (aiResult.hint) {
-          setPecoMessage(aiResult.hint);
-          setPecoState(aiResult.peco_state);
-        }
+  setChildAge(cleanAge);
 
-        const record: ProgressRecord = {
-          activityId,
-          timestamp: Date.now(),
-          skillLevel: aiResult.result,
-          difficultyLevel: aiResult.difficulty_level,
-          accuracy: telemetry.accuracy,
-        };
+  try {
+    localStorage.setItem('nurture_child_age', String(cleanAge));
+  } catch {}
+}, []);
 
-        setChildProfile((prev) => {
-          const updated = [...prev, record];
-          try {
-            localStorage.setItem('nurture_child_profile', JSON.stringify(updated));
-          } catch {}
-          return updated;
-        });
-      } catch (err) {
-        console.error('AI personalization error:', err);
+const onCorrectAnswer = useCallback(
+  async (telemetry?: Telemetry, activityId?: string) => {
+    if (!telemetry || !activityId) {
+      pecoCompanion.onCorrectAnswer(lowSensoryRef.current);
+      return;
+    }
+
+    try {
+      const aiResult = await submitAssessment(telemetry, childName);
+
+      // ML is the single source of truth for adaptation
+      const nextDifficulty = Math.max(
+        1,
+        Math.min(10, aiResult.difficulty_level)
+      );
+
+      setDifficultyLevel(nextDifficulty);
+
+      // Update Peco
+      setPecoState(aiResult.peco_state);
+      setPecoMessage(
+        aiResult.hint || "Great work! Keep going!"
+      );
+
+            // Let the current activity control Peco's spoken feedback.
+      // Real-World Mission already provides its own contextual
+      // success/wrong-answer speech, so do not let ML feedback
+      // overwrite it with a generic line.
+      if (aiResult.hint && activityId !== 'REAL_WORLD_MISSION') {
+        await pecoCompanion.speak(
+          aiResult.hint,
+          aiResult.peco_state,
+          {
+            priority: "high",
+            force: true,
+          },
+          lowSensoryRef.current
+        );
+      }
+
+      // Save learning history
+      const record: ProgressRecord = {
+        activityId,
+        timestamp: Date.now(),
+        skillLevel: aiResult.result,
+        difficultyLevel: nextDifficulty,
+        accuracy: telemetry.accuracy,
+      };
+
+      setChildProfile((prev) => {
+        const updated = [...prev, record];
+
+        try {
+          localStorage.setItem(
+            "nurture_child_profile",
+            JSON.stringify(updated)
+          );
+        } catch {}
+
+        return updated;
+      });
+
+    } catch (err) {
+      console.error("Bloomy ML adaptation failed:", err);
+
+      // IMPORTANT:
+      // Do not pretend the ML model succeeded.
+      // Keep the child's current difficulty and use Peco's
+      // local supportive behavior instead.
+      if (activityId !== 'REAL_WORLD_MISSION') {
+        pecoCompanion.onCorrectAnswer(
+          lowSensoryRef.current
+        );
       }
     }
-  }, [childName]);
+  },
+  [childName]
+); 
 
   const onIncorrectAnswer = useCallback((attempt?: number) => {
     pecoCompanion.onIncorrectAnswer(attempt, lowSensoryRef.current);
@@ -538,7 +606,6 @@ export const NurtureProvider = ({ children }: { children: ReactNode }) => {
 
       const unlockAnnouncement = `You've been practicing ${mission.skill}! Ready to try using it in the real world?`;
       triggerPecoEvent('PROUD', unlockAnnouncement, 5000);
-      speak(unlockAnnouncement, 'proud', { priority: 'high', force: true });
 
       return { unlocked: true, mission };
     } else {
@@ -566,7 +633,6 @@ export const NurtureProvider = ({ children }: { children: ReactNode }) => {
     activitiesCompletedTowardsMission,
     completedRealWorldMissionIds,
     triggerPecoEvent,
-    speak,
   ]);
 
   const [activityExerciseCounts, setActivityExerciseCounts] = useState<Record<string, number>>(() => {
@@ -674,9 +740,9 @@ export const NurtureProvider = ({ children }: { children: ReactNode }) => {
 
       const speech = `You've been practicing ${mission.skill}! Ready to try using it in the real world?`;
       triggerPecoEvent('PROUD', speech, 5000);
-      speak(speech, 'proud', { priority: 'high', force: true });
+      
     },
-    [recentActivitySkills, completedRealWorldMissionIds, triggerPecoEvent, speak]
+    [recentActivitySkills, completedRealWorldMissionIds, triggerPecoEvent]
   );
 
   return (
@@ -714,7 +780,6 @@ export const NurtureProvider = ({ children }: { children: ReactNode }) => {
       inworldError,
       setInworldError,
       stopSpeaking,
-      speak,
       onAppStart,
       onActivityEnter,
       onCorrectAnswer,
@@ -730,6 +795,8 @@ export const NurtureProvider = ({ children }: { children: ReactNode }) => {
       childProfile,
       childName,
       updateChildName,
+      childAge,
+      updateChildAge,
     }}>
       {children}
     </NurtureContext.Provider>
